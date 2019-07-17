@@ -16,14 +16,13 @@ output_dim = 2
 model, optimizer = get_model(input_dim, hidden, output_dim, lr)
 
 env = gym.make('CartPole-v0')
-epochs = 1200
-max_duration = 250
+epochs = 10000
 losses = []
 durations = []
 average_durations = []
 
 
-hyperparams = (epochs, max_duration, gamma)
+hyperparams = (epochs, gamma)
 actor_env = (model, env)
 training = (loss_fn, optimizer)
 metrics = (losses, durations, average_durations)

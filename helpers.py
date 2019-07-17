@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 
 def train_model(hyperparams, actor_env, training, metrics, early_stop_target=200., early_stop_threshold=5):
 
-    (epochs, MAX_DUR, gamma) = hyperparams
+    (epochs, gamma) = hyperparams
     (model, env) = actor_env
     (loss_fn, optimizer) = training
     (losses, durations, average_durations) = metrics
@@ -35,11 +35,8 @@ def train_model(hyperparams, actor_env, training, metrics, early_stop_target=200
             state = next_state
             t += 1
 
-            if t > MAX_DUR:
-                break
-
         ep_len = len(obs)  # M
-        rewards = torch.arange(ep_len, 0, -1).float()  # ??
+        rewards = torch.arange(ep_len, 0, -1).float()
         d_rewards = discount_rewards(rewards, gamma)
         preds = torch.zeros(ep_len)
 

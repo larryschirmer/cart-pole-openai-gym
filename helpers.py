@@ -57,7 +57,7 @@ def train_model(hyperparams, actor_env, training, metrics, early_stop_target=200
 
         durations.append(ep_len)
         average_duration = 0. if len(
-            durations) < 100 else np.average(durations[-100:])
+            durations) < 100 else np.average(durations[-50:])
         average_durations.append(average_duration)
         print("episode {}, loss: {:.5f}, avg: {:.2f} :: {}".format(
             episode, loss, average_duration, ep_len))

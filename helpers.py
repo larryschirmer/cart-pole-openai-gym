@@ -70,7 +70,10 @@ def train_model(hyperparams, actor_env, training, metrics, early_stop_target=200
 
 def discount_rewards(rewards, gamma=0.99):
     lenr = len(rewards)
-    d_rewards = torch.pow(gamma, torch.arange(lenr)).float() * rewards
+    gamma_tensor = torch.ones((1, lenr)).new_full((1, lenr), gamma).float()
+    powers = torch.arange(lenr).float()
+    decay = torch.pow(gamma_tensor, powers).float()
+    d_rewards = decay * rewards
     d_rewards = (d_rewards - d_rewards.mean()) / (d_rewards.std() + 1e-07)
     return d_rewards
 

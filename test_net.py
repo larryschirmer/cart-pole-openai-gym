@@ -13,7 +13,7 @@ output_dim = 2
 
 model, optimizer = get_model(input_dim, hidden, output_dim, lr)
 
-filename = 'checkpoint-1897.pt'
+filename = 'checkpoint-2881.pt'
 model, optimizer = load_model(model, optimizer, filename)
 
 env = gym.make('CartPole-v0')

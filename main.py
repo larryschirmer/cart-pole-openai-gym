@@ -6,7 +6,7 @@ from time import perf_counter
 from model import get_model, loss_fn
 from helpers import discount_rewards, train_model, plot_losses, plot_durations, save_model, load_model
 
-lr = 0.0009
+lr = 0.001
 gamma = 0.99
 
 input_dim = 4
@@ -29,7 +29,7 @@ metrics = (losses, durations, average_durations)
 
 start = perf_counter()
 final_episode = train_model(hyperparams, actor_env, training,
-                            metrics, early_stop_target=200., early_stop_threshold=5)
+                            metrics, early_stop_target=200., early_stop_threshold=150)
 save_model(model, optimizer, 'checkpoint-{}.pt'.format(final_episode))
 end = perf_counter()
 print((end - start))

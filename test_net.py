@@ -10,16 +10,19 @@ lr = 0.0009
 input_dim = 4
 hidden = 150
 output_dim = 2
+max_timesteps = 3000
 
 model, optimizer = get_model(input_dim, hidden, output_dim, lr)
 
-filename = 'checkpoint-2881.pt'
+filename = 'checkpoint-863.pt'
 model, optimizer = load_model(model, optimizer, filename)
 
 env = gym.make('CartPole-v0')
+env._max_episode_steps = max_timesteps
 
 done = False
 state = env.reset()
+duration = 0
 
 while not done:
     pred = model(torch.from_numpy(state).float())
@@ -28,5 +31,9 @@ while not done:
     env.render()
 
     state = next_state
+    duration += 1
 
 env.close()
+print("success: {} :: {:.2f}".format(duration ==
+                                 max_timesteps, duration / max_timesteps))
+ 

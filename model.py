@@ -1,19 +1,30 @@
 import torch
+from torch import nn
+from torch.nn import functional as F
 
 
-def get_model(input_dim, hidden, output_dim, lr):
-    model = torch.nn.Sequential(
-        torch.nn.Linear(input_dim, hidden),
-        torch.nn.LeakyReLU(),
-        torch.nn.Linear(hidden, output_dim),
-        torch.nn.Softmax(dim=0)
-    )
+class ActorCritic(nn.Module):
+    def __init__(self, input_dim, shared_hidden, critic_hidden, output_dim_actor, output_dim_critic):
+        super(ActorCritic, self).__init__()
+        self.shared_linear = nn.Linear(input_dim, shared_hidden)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        self.actor_linear = nn.Linear(shared_hidden, output_dim_actor)
 
-    return model, optimizer
+        self.critic_linear1 = nn.Linear(shared_hidden, critic_hidden)
+        self.critic_linear2 = nn.Linear(critic_hidden, output_dim_critic)
 
-def loss_fn(preds, r): 
+    def forward(self, x):
+        x = F.normalize(x, dim=0)
+        y = nn.LeakyReLU(self.shared_linear(x))
+
+        actor = F.log_softmax(self.actor_linear(y), dim=0)
+
+        c = nn.LeakyReLU(self.critic_linear1(y.detach()))
+        critic = torch.tanh(self.critic_linear2(c))
+        return actor, critic
+
+
+def loss_fn(preds, r):
     # pred is output from neural network
     # r is return (sum of rewards to end of episode)
-    return -torch.sum(r * torch.log(preds)) # element-wise multipliy, then sum
+    return -torch.sum(r * torch.log(preds))  # element-wise multipliy, then sum

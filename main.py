@@ -1,7 +1,9 @@
 import numpy as np
 import torch
+import gym
 from torch import optim
 import torch.multiprocessing as mp
+import pandas as pd
 from time import perf_counter
 
 
@@ -17,41 +19,42 @@ critic_hidden = 25
 output_dim_actor = 2
 output_dim_critic = 1
 
-model, optimizer = ActorCritic(
+model = ActorCritic(
     input_dim, shared_hidden, critic_hidden, output_dim_actor, output_dim_critic)
 
+env = gym.make('CartPole-v0')
 
-epochs = 10000
+epochs = 1000
 losses = []
+actor_losses = []
+critic_losses = []
 durations = []
-average_durations = []
-
-
-hyperparams = (epochs, gamma)
-actor_env = (model, env)
-training = (loss_fn, optimizer)
-metrics = (losses, durations, average_durations)
 
 params = {
     'epochs': epochs,
     'n_workers': mp.cpu_count(),
     'lr': lr,
-    'gamma': gamma
+    'gamma': gamma,
+    'losses': losses,
+    'durations': durations,
+    'actor_losses': actor_losses,
+    'critic_losses': critic_losses
 }
 
 
-start = perf_counter()
+worker(model, params)
+save_model(model, 'actor_critic.pt')
 
-worker(t, worker_model, counter, params)
+rolling_window = 100
+ave_loss = pd.Series(losses).rolling(rolling_window).mean()
+plot_losses(ave_loss, filename='losses.png', plotName='Losses')
 
+ave_actor_loss = pd.Series(actor_losses).rolling(rolling_window).mean()
+plot_losses(actor_losses, filename='actor_losses.png', plotName='Actor Losses')
 
-final_episode = train_model(hyperparams, actor_env, training,
-                            metrics, early_stop_target=1000., early_stop_threshold=10)
-save_model(model, optimizer, 'checkpoint-{}.pt'.format(final_episode))
-end = perf_counter()
-print((end - start))
+ave_critic_loss = pd.Series(critic_losses).rolling(rolling_window).mean()
+plot_losses(ave_critic_loss, filename='critic_losses.png',
+            plotName='Critic Losses')
 
-plot_losses(losses, 'losses-{}.png'.format(final_episode))
-plot_durations(durations, 'durations-{}.png'.format(final_episode))
-plot_durations(average_durations,
-               'ave-durations-{}.png'.format(final_episode),  plotName='Ave Durations')
+ave_duration = pd.Series(durations).rolling(50).mean()
+plot_durations(ave_duration, filename='durations.png', plotName='Durations')

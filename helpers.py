@@ -12,16 +12,14 @@ def train_model(hyperparams, actor_env, training, metrics, early_stop_target=200
     (loss_fn, optimizer) = training
     (losses, durations, average_durations) = metrics
 
-    current_episode = 0
     early_stop_captures = []
 
     for episode in range(epochs):
         if len(early_stop_captures) >= early_stop_threshold:
             print("stopped early because net has reached target score")
             print(early_stop_captures)
-            break
+            return episode
 
-        current_episode = episode
         state = env.reset()
         done = False
         t = 0
@@ -64,8 +62,6 @@ def train_model(hyperparams, actor_env, training, metrics, early_stop_target=200
         if average_duration >= early_stop_target:
             early_stop_captures.append(average_duration)
 
-    return current_episode
-
 
 def discount_rewards(rewards, gamma=0.99):
     lenr = len(rewards)
@@ -77,12 +73,12 @@ def discount_rewards(rewards, gamma=0.99):
     return d_rewards
 
 
-def plot_losses(losses, filename='', show=False):
+def plot_losses(losses, filename='', plotName='Loss', show=False):
     fig = plt.figure()
     fig.add_subplot(111)
-    plt.ylabel("Loss")
-    plt.xlabel("Training Steps")
     plt.plot(np.arange(len(losses)), losses)
+    plt.ylabel(plotName)
+    plt.xlabel("Training Steps")
     if show:
         plt.show()
 
@@ -103,10 +99,9 @@ def plot_durations(durations, filename='', plotName='Duration', show=False):
         plt.savefig(filename)
 
 
-def save_model(model, optimizer, filename):
+def save_model(model, filename):
     state = {
         'state_dict': model.state_dict(),
-        'optimizer': optimizer.state_dict()
     }
     torch.save(state, filename)
 
@@ -124,71 +119,73 @@ def load_model(model, optimizer, filename, evalMode=True):
     return model, optimizer
 
 
-def worker(worker_model, counter, params):
-    worker_env = gym.make("CartPole-v1")
-    worker_env._max_episode_steps = 3000
-    worker_env.reset()
-    worker_opt = torch.optim.Adam(
-        lr=params['lr'], params=worker_model.parameters())
+def worker(model, params):
+    env = gym.make("CartPole-v1")
+    env._max_episode_steps = 3000
+    optimizer = torch.optim.Adam(
+        lr=params['lr'], params=model.parameters())
 
-    for i in range(params['epochs']):
-        worker_opt.zero_grad()
-        values, logprobs, rewards = run_episode(worker_env, worker_model)
-        actor_loss, critic_loss, eplen = update_params(
-            worker_opt, values, logprobs, rewards, gamma=params['gamma'])
+    for epoch in range(params['epochs']):
+        values, logprobs, rewards = run_episode(env, model)
+        loss, actor_loss, critic_loss, eplen = update_params(
+            optimizer, values, logprobs, rewards, gamma=params['gamma'])
 
-        counter.value = counter.value + 1
+        params['losses'].append(loss.item())
+        params['durations'].append(eplen)
+        params['actor_losses'].append(actor_loss.item())
+        params['critic_losses'].append(critic_loss.item())
+
+        if epoch % 10 == 0:
+            print("Epoch: {}, Loss: {:.2f}, Ep Len: {:.2f}".format(
+                epoch, loss, eplen))
 
 
-def run_episode(worker_env, worker_model):
-    state = torch.from_numpy(worker_env.env.state).float()
+def run_episode(env, model):
+    state = torch.from_numpy(env.reset()).float()
     values, logprobs, rewards = [], [], []
     done = False
-    j = 0
 
     while (done == False):
-        j += 1
-        policy, value = worker_model(state)
+        policy, value = model(state)
 
         logits = policy.view(-1)
         action_dist = torch.distributions.Categorical(logits=logits)
         action = action_dist.sample()
         logprob = policy.view(-1)[action]
 
-        logprobs.append(logprob)
         values.append(value)
-        
-        state_, _, done, info = worker_env.step(action.detach().numpy())
+        logprobs.append(logprob)
+
+        state_, reward, done, _ = env.step(action.detach().numpy())
         state = torch.from_numpy(state_).float()
 
         if done:
             reward = -10
-            worker_env.reset()
-        else:
-            reward = 1.0
+            env.reset()
 
         rewards.append(reward)
 
     return values, logprobs, rewards
 
 
-def update_params(worker_opt, values, logprobs, rewards, clc=0.1, gamma=0.95):
+def update_params(optimizer, values, logprobs, rewards, clc=0.1, gamma=0.95):
     rewards = torch.Tensor(rewards).flip(dims=(0,)).view(-1)
     logprobs = torch.stack(logprobs).flip(dims=(0,)).view(-1)
     values = torch.stack(values).flip(dims=(0,)).view(-1)
     Returns = []
-    ret_ = torch.Tensor([0])
+    total_return = torch.Tensor([0])
 
-    for r in range(rewards.shape[0]):
-        ret_ = rewards[r] + gamma * ret_
-        Returns.append(ret_)
+    for reward_index in range(len(rewards)):
+        total_return = rewards[reward_index] + gamma * total_return
+        Returns.append(total_return)
 
     Returns = torch.stack(Returns).view(-1)
     Returns = F.normalize(Returns, dim=0)
     actor_loss = -1*logprobs * (Returns - values.detach())
     critic_loss = torch.pow(values - Returns, 2)
     loss = actor_loss.sum() + clc*critic_loss.sum()
+    optimizer.zero_grad()
     loss.backward()
-    worker_opt.step()
+    optimizer.step()
 
-    return actor_loss, critic_loss, len(rewards)
+    return loss, actor_loss.sum(), critic_loss.sum(), len(rewards)

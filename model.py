@@ -15,11 +15,11 @@ class ActorCritic(nn.Module):
 
     def forward(self, x):
         x = F.normalize(x, dim=0)
-        y = nn.LeakyReLU(self.shared_linear(x))
+        y = F.relu(self.shared_linear(x))
 
         actor = F.log_softmax(self.actor_linear(y), dim=0)
 
-        c = nn.LeakyReLU(self.critic_linear1(y.detach()))
+        c = F.relu(self.critic_linear1(y.detach()))
         critic = torch.tanh(self.critic_linear2(c))
         return actor, critic
 

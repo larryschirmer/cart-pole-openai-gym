@@ -121,7 +121,7 @@ def load_model(model, optimizer, filename, evalMode=True):
 
 def worker(model, params):
     env = gym.make("CartPole-v1")
-    env._max_episode_steps = 3000
+    env._max_episode_steps = 1000
     optimizer = torch.optim.Adam(
         lr=params['lr'], params=model.parameters())
 
@@ -138,7 +138,7 @@ def worker(model, params):
         params['critic_losses'].append(critic_loss.item())
 
         if epoch % 10 == 0:
-            print("Epoch: {}, Loss: {:.2f}, Ep Len: {:.2f}".format(
+            print("Epoch: {}, Loss: {:.4f}, Ep Len: {}".format(
                 epoch, loss, eplen))
 
 
@@ -173,28 +173,40 @@ def run_episode(env, model, optimizer, params):
         rewards.append(reward)
 
         if step_count % params['step_update'] == 0:
-            update_params(optimizer, values, logprobs, rewards, params)
+            update_params(optimizer, values, logprobs, rewards, params, mid_update=True)
 
     return values, logprobs, rewards, len(rewards)
 
 
-def update_params(optimizer, values, logprobs, rewards, params, clc=0.1):
+prev_logprobs = 0
+def update_params(optimizer, values, logprobs, rewards, params, mid_update=False):
+    global prev_logprobs
+
     rewards = torch.Tensor(rewards).flip(dims=(0,)).view(-1)
     logprobs = torch.stack(logprobs).flip(dims=(0,)).view(-1)
     values = torch.stack(values).flip(dims=(0,)).view(-1)
     Returns = []
     total_return = torch.Tensor([0])
 
+    if mid_update:
+        rewards = rewards[-params['step_update']:]
+        logprobs = logprobs[-params['step_update']:]
+        values = values[-params['step_update']:]
+
     for reward_index in range(len(rewards)):
         total_return = rewards[reward_index] + params['gamma'] * total_return
         Returns.append(total_return)
 
+    gae_reduction = torch.Tensor(
+        [(1 - params['gae']) * params['gae'] ** i for i in range(len(Returns))]).flip(dims=(0,))
+    gae_reduction = gae_reduction if not mid_update else 1
     Returns = torch.stack(Returns).view(-1)
     Returns = F.normalize(Returns, dim=0)
-    actor_loss = -1*logprobs * \
-        (Returns - values.detach())  # advantage vunction
-    critic_loss = torch.pow(values - Returns, 2)
-    loss = actor_loss.sum() + clc*critic_loss.sum()
+
+    actor_loss = -1*logprobs * (Returns - values.detach()) * gae_reduction
+    critic_loss = torch.pow(values - (Returns * gae_reduction), 2)
+
+    loss = actor_loss.sum() + params['clc']*critic_loss.sum()
     optimizer.zero_grad()
     loss.backward(retain_graph=True)
     optimizer.step()

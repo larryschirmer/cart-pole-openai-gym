@@ -3,37 +3,28 @@ import gym
 import numpy as np
 from time import sleep
 
-from model import get_model
-from helpers import load_model
+from model import ActorCritic
+from helpers import load_model, worker
 
-lr = 0.0009
+lr = 0.001
+gamma = 0.99
+
 input_dim = 4
-hidden = 150
-output_dim = 2
+shared_hidden = 150
+critic_hidden = 25
+output_dim_actor = 2
+output_dim_critic = 1
 max_timesteps = 3000
 
-model, optimizer = get_model(input_dim, hidden, output_dim, lr)
+model = ActorCritic(
+    input_dim, shared_hidden, critic_hidden, output_dim_actor, output_dim_critic)
 
-filename = 'checkpoint-863.pt'
-model, optimizer = load_model(model, optimizer, filename)
+filename = 'actor_critic.pt'
+model = load_model(model, filename)
 
-env = gym.make('CartPole-v0')
-env._max_episode_steps = max_timesteps
+params = {
+    'epochs': 1,
+    'n_workers': 0
+}
 
-done = False
-state = env.reset()
-duration = 0
-
-while not done:
-    pred = model(torch.from_numpy(state).float())
-    action = np.random.choice(np.array([0, 1]), p=pred.data.numpy())
-    next_state, _reward, done, _info = env.step(action)
-    env.render()
-
-    state = next_state
-    duration += 1
-
-env.close()
-print("success: {} :: {:.2f}".format(duration ==
-                                 max_timesteps, duration / max_timesteps))
- 
+worker(model, params, None, 0, render=True, train=False)

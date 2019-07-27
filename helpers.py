@@ -2,6 +2,7 @@ import torch
 from torch.nn import functional as F
 import gym
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 
 
@@ -106,41 +107,46 @@ def save_model(model, filename):
     torch.save(state, filename)
 
 
-def load_model(model, optimizer, filename, evalMode=True):
+def load_model(model, filename, evalMode=True):
     checkpoint = torch.load(filename)
     model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
 
     if evalMode:
         model.eval()
     else:
         model.train()
 
-    return model, optimizer
+    return model
 
 
-def worker(model, params):
+def worker(model, params, counter, worker_index, render=False, train=True, max_eps=300):
+    losses = []
+    durations = []
     env = gym.make("CartPole-v1")
-    env._max_episode_steps = 3000
-    optimizer = torch.optim.Adam(
-        lr=params['lr'], params=model.parameters())
+    env._max_episode_steps = max_eps
+    if train:
+        optimizer = torch.optim.Adam(
+            lr=params['lr'], params=model.parameters())
 
     for epoch in range(params['epochs']):
-        values, logprobs, rewards = run_episode(env, model)
-        loss, actor_loss, critic_loss, eplen = update_params(
-            optimizer, values, logprobs, rewards, gamma=params['gamma'])
+        values, logprobs, rewards = run_episode(env, model, render)
 
-        params['losses'].append(loss.item())
-        params['durations'].append(eplen)
-        params['actor_losses'].append(actor_loss.item())
-        params['critic_losses'].append(critic_loss.item())
+        if train:
+            loss, actor_loss, critic_loss, eplen = update_params(
+                optimizer, values, logprobs, rewards, gamma=params['gamma'])
 
-        if epoch % 10 == 0:
-            print("Epoch: {}, Loss: {:.2f}, Ep Len: {:.2f}".format(
-                epoch, loss, eplen))
+            losses.append(loss.item())
+            durations.append(eplen)
+            counter.value += 1
+
+            if epoch % 50 == 0:
+                rolling_window = 20
+                ave_loss = pd.Series(losses).rolling(rolling_window).mean()[-1:].item()
+                ave_duration = pd.Series(durations).rolling(rolling_window).mean()[-1:].item()
+                print("Epoch: {}, Loss: {:.2f}, Ep Len: {:.2f}".format(epoch, ave_loss, ave_duration))
 
 
-def run_episode(env, model):
+def run_episode(env, model, render):
     state = torch.from_numpy(env.reset()).float()
     values, logprobs, rewards = [], [], []
     done = False
@@ -157,6 +163,10 @@ def run_episode(env, model):
         logprobs.append(logprob)
 
         state_, reward, done, _ = env.step(action.detach().numpy())
+
+        if render:
+            env.render()
+
         state = torch.from_numpy(state_).float()
 
         if done:

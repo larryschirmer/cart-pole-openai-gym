@@ -12,6 +12,8 @@ from helpers import discount_rewards, train_model, plot_losses, plot_durations, 
 
 lr = 0.001
 gamma = 0.99
+lamda_step_decay = 0
+step_update = 50
 
 input_dim = 4
 shared_hidden = 150
@@ -21,8 +23,6 @@ output_dim_critic = 1
 
 model = ActorCritic(
     input_dim, shared_hidden, critic_hidden, output_dim_actor, output_dim_critic)
-
-env = gym.make('CartPole-v0')
 
 epochs = 1000
 losses = []
@@ -34,7 +34,9 @@ params = {
     'epochs': epochs,
     'n_workers': mp.cpu_count(),
     'lr': lr,
+    'step_update': step_update,
     'gamma': gamma,
+    'lambda': lamda_step_decay, 
     'losses': losses,
     'durations': durations,
     'actor_losses': actor_losses,

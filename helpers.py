@@ -126,9 +126,11 @@ def worker(model, params):
         lr=params['lr'], params=model.parameters())
 
     for epoch in range(params['epochs']):
-        values, logprobs, rewards = run_episode(env, model)
-        loss, actor_loss, critic_loss, eplen = update_params(
-            optimizer, values, logprobs, rewards, gamma=params['gamma'])
+        values, logprobs, rewards, eplen = run_episode(
+            env, model, optimizer, params)
+
+        loss, actor_loss, critic_loss = update_params(
+            optimizer, values, logprobs, rewards, params)
 
         params['losses'].append(loss.item())
         params['durations'].append(eplen)
@@ -140,12 +142,17 @@ def worker(model, params):
                 epoch, loss, eplen))
 
 
-def run_episode(env, model):
+def run_episode(env, model, optimizer, params):
     state = torch.from_numpy(env.reset()).float()
     values, logprobs, rewards = [], [], []
     done = False
 
+    loss, actor_loss, critic_loss = (
+        torch.tensor(0), torch.tensor(0), torch.tensor(0))
+
+    step_count = 0
     while (done == False):
+        step_count += 1
         policy, value = model(state)
 
         logits = policy.view(-1)
@@ -165,10 +172,13 @@ def run_episode(env, model):
 
         rewards.append(reward)
 
-    return values, logprobs, rewards
+        if step_count % params['step_update'] == 0:
+            update_params(optimizer, values, logprobs, rewards, params)
+
+    return values, logprobs, rewards, len(rewards)
 
 
-def update_params(optimizer, values, logprobs, rewards, clc=0.1, gamma=0.95):
+def update_params(optimizer, values, logprobs, rewards, params, clc=0.1):
     rewards = torch.Tensor(rewards).flip(dims=(0,)).view(-1)
     logprobs = torch.stack(logprobs).flip(dims=(0,)).view(-1)
     values = torch.stack(values).flip(dims=(0,)).view(-1)
@@ -176,16 +186,17 @@ def update_params(optimizer, values, logprobs, rewards, clc=0.1, gamma=0.95):
     total_return = torch.Tensor([0])
 
     for reward_index in range(len(rewards)):
-        total_return = rewards[reward_index] + gamma * total_return
+        total_return = rewards[reward_index] + params['gamma'] * total_return
         Returns.append(total_return)
 
     Returns = torch.stack(Returns).view(-1)
     Returns = F.normalize(Returns, dim=0)
-    actor_loss = -1*logprobs * (Returns - values.detach())
+    actor_loss = -1*logprobs * \
+        (Returns - values.detach())  # advantage vunction
     critic_loss = torch.pow(values - Returns, 2)
     loss = actor_loss.sum() + clc*critic_loss.sum()
     optimizer.zero_grad()
-    loss.backward()
+    loss.backward(retain_graph=True)
     optimizer.step()
 
-    return loss, actor_loss.sum(), critic_loss.sum(), len(rewards)
+    return loss, actor_loss.sum(), critic_loss.sum()

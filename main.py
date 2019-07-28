@@ -10,11 +10,11 @@ from time import perf_counter
 from model import ActorCritic, loss_fn
 from helpers import discount_rewards, train_model, plot_losses, plot_durations, save_model, load_model, worker
 
-lr = 0.001
+lr = 0.0015
 gamma = 0.99
 gae = 0.9
 clc = 0.1
-step_update = 50
+step_update = 100
 ppo_epsilon = 0.2
 
 input_dim = 4
@@ -52,7 +52,7 @@ params = {
 worker(model, params)
 save_model(model, 'actor_critic.pt')
 
-rolling_window = 100
+rolling_window = 50
 ave_loss = pd.Series(losses).rolling(rolling_window).mean()
 plot_losses(ave_loss, filename='losses.png', plotName='Losses')
 

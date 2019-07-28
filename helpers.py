@@ -124,9 +124,14 @@ def worker(model, params, render=False, train=True):
     optimizer = torch.optim.Adam(
         lr=params['lr'], params=model.parameters())
 
+    highest_score = 0
     for epoch in range(params['epochs']):
         values, logprobs, rewards, eplen = run_episode(
             env, model, optimizer, params, render, train)
+
+        if train and eplen > highest_score:
+            highest_score = eplen
+            save_model(model, 'actor_critic_checkpoint@highest.pt')
 
         if train:
             loss, actor_loss, critic_loss = update_params(
@@ -138,9 +143,8 @@ def worker(model, params, render=False, train=True):
             params['critic_losses'].append(critic_loss.item())
 
             if epoch % 10 == 0:
-                print("Epoch: {}, Loss: {:.4f}, Ep Len: {}".format(
-                    epoch, loss, eplen))
-
+                print("Epoch: {}, Loss: {:.4f}, Ep Len: {}, highest: {}".format(
+                    epoch, loss, eplen, highest_score))
 
 def run_episode(env, model, optimizer, params, render, train):
     state = torch.from_numpy(env.reset()).float()
@@ -220,4 +224,4 @@ def update_params(optimizer, values, logprobs, rewards, params, mid_update=False
     loss.backward(retain_graph=True)
     optimizer.step()
 
-    return loss, actor_loss.sum(), critic_loss.mean()
+    return loss, actor_loss.sum(), critic_loss.sum()

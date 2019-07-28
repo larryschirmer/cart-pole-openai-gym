@@ -23,7 +23,8 @@ output_dim_critic = 1
 model = ActorCritic(
     input_dim, shared_hidden0, shared_hidden1, critic_hidden, output_dim_actor, output_dim_critic)
 
-filename = 'actor_critic.pt'
+filename = 'actor_critic_checkpoint@highest.pt'
+# filename = 'actor_critic.pt'
 model = load_model(model, filename)
 
 params = {

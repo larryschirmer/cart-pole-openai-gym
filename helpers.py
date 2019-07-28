@@ -124,16 +124,22 @@ def worker(model, params, counter, worker_index, render=False, train=True, max_e
     durations = []
     env = gym.make("CartPole-v1")
     env._max_episode_steps = max_eps
-    if train:
-        optimizer = torch.optim.Adam(
-            lr=params['lr'], params=model.parameters())
+    optimizer = torch.optim.Adam(
+        lr=params['lr'], params=model.parameters())
 
+    highest_score = 0
     for epoch in range(params['epochs']):
-        values, logprobs, rewards = run_episode(env, model, render)
+        values, logprobs, rewards, eplen = run_episode(
+            env, model, optimizer, params, render, train)
+
+        if train and eplen > highest_score:
+            highest_score = eplen
+            save_model(
+                model, 'actor_critic_checkpoint@highest-{:02d}.pt'.format(worker_index))
 
         if train:
-            loss, actor_loss, critic_loss, eplen = update_params(
-                optimizer, values, logprobs, rewards, gamma=params['gamma'])
+            loss, actor_loss, critic_loss = update_params(
+                optimizer, values, logprobs, rewards, params)
 
             losses.append(loss.item())
             durations.append(eplen)
@@ -141,17 +147,26 @@ def worker(model, params, counter, worker_index, render=False, train=True, max_e
 
             if epoch % 50 == 0:
                 rolling_window = 20
-                ave_loss = pd.Series(losses).rolling(rolling_window).mean()[-1:].item()
-                ave_duration = pd.Series(durations).rolling(rolling_window).mean()[-1:].item()
-                print("Epoch: {}, Loss: {:.2f}, Ep Len: {:.2f}".format(epoch, ave_loss, ave_duration))
+                ave_loss = pd.Series(losses).rolling(
+                    rolling_window).mean()[-1:].item()
+                ave_duration = pd.Series(durations).rolling(
+                    rolling_window).mean()[-1:].item()
+                print("#{:02d}, Epoch: {}, highest: {}".format(worker_index, epoch, highest_score))
+        
+        env.close()
 
 
-def run_episode(env, model, render):
+def run_episode(env, model, optimizer, params, render, train):
     state = torch.from_numpy(env.reset()).float()
     values, logprobs, rewards = [], [], []
     done = False
 
+    loss, actor_loss, critic_loss = (
+        torch.tensor(0), torch.tensor(0), torch.tensor(0))
+
+    step_count = 0
     while (done == False):
+        step_count += 1
         policy, value = model(state)
 
         logits = policy.view(-1)
@@ -163,11 +178,10 @@ def run_episode(env, model, render):
         logprobs.append(logprob)
 
         state_, reward, done, _ = env.step(action.detach().numpy())
+        state = torch.from_numpy(state_).float()
 
         if render:
             env.render()
-
-        state = torch.from_numpy(state_).float()
 
         if done:
             reward = -10
@@ -175,27 +189,53 @@ def run_episode(env, model, render):
 
         rewards.append(reward)
 
-    return values, logprobs, rewards
+        if train and step_count % params['step_update'] == 0:
+            update_params(optimizer, values, logprobs,
+                          rewards, params, mid_update=True)
+
+    return values, logprobs, rewards, len(rewards)
 
 
-def update_params(optimizer, values, logprobs, rewards, clc=0.1, gamma=0.95):
+prev_logprobs = torch.Tensor([0])
+
+
+def update_params(optimizer, values, logprobs, rewards, params, mid_update=False):
+    global prev_logprobs
+
     rewards = torch.Tensor(rewards).flip(dims=(0,)).view(-1)
     logprobs = torch.stack(logprobs).flip(dims=(0,)).view(-1)
     values = torch.stack(values).flip(dims=(0,)).view(-1)
     Returns = []
     total_return = torch.Tensor([0])
 
+    if mid_update:
+        rewards = rewards[-params['step_update']:]
+        logprobs = logprobs[-params['step_update']:]
+        values = values[-params['step_update']:]
+
     for reward_index in range(len(rewards)):
-        total_return = rewards[reward_index] + gamma * total_return
+        total_return = rewards[reward_index] + params['gamma'] * total_return
         Returns.append(total_return)
 
+    gae_reduction = torch.Tensor(
+        [(1 - params['gae']) * params['gae'] ** i for i in range(len(Returns))]).flip(dims=(0,))
+    gae_reduction = gae_reduction if not mid_update else 1
     Returns = torch.stack(Returns).view(-1)
     Returns = F.normalize(Returns, dim=0)
-    actor_loss = -1*logprobs * (Returns - values.detach())
-    critic_loss = torch.pow(values - Returns, 2)
-    loss = actor_loss.sum() + clc*critic_loss.sum()
+
+    ppo_ratio = (logprobs - prev_logprobs[-1:]).exp()
+    torch.cat((prev_logprobs[1:], logprobs))
+    advantage = Returns - values.detach()
+    surrogate0 = ppo_ratio * advantage
+    surrogate1 = torch.clamp(
+        ppo_ratio, 1.0 - params['ppo_epsilon'], 1.0 + params['ppo_epsilon']) * advantage
+
+    actor_loss = - torch.min(surrogate0, surrogate1) * gae_reduction
+    critic_loss = torch.pow(values - (Returns * gae_reduction), 2)
+
+    loss = actor_loss.mean() + params['clc']*critic_loss.mean()
     optimizer.zero_grad()
-    loss.backward()
+    loss.backward(retain_graph=True)
     optimizer.step()
 
-    return loss, actor_loss.sum(), critic_loss.sum(), len(rewards)
+    return loss, actor_loss.sum(), critic_loss.sum()

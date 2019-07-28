@@ -106,43 +106,43 @@ def save_model(model, filename):
     torch.save(state, filename)
 
 
-def load_model(model, optimizer, filename, evalMode=True):
+def load_model(model, filename, evalMode=True):
     checkpoint = torch.load(filename)
     model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
 
     if evalMode:
         model.eval()
     else:
         model.train()
 
-    return model, optimizer
+    return model
 
 
-def worker(model, params):
+def worker(model, params, render=False, train=True):
     env = gym.make("CartPole-v1")
-    env._max_episode_steps = 1000
+    env._max_episode_steps = 5000
     optimizer = torch.optim.Adam(
         lr=params['lr'], params=model.parameters())
 
     for epoch in range(params['epochs']):
         values, logprobs, rewards, eplen = run_episode(
-            env, model, optimizer, params)
+            env, model, optimizer, params, render, train)
 
-        loss, actor_loss, critic_loss = update_params(
-            optimizer, values, logprobs, rewards, params)
+        if train:
+            loss, actor_loss, critic_loss = update_params(
+                optimizer, values, logprobs, rewards, params)
 
-        params['losses'].append(loss.item())
-        params['durations'].append(eplen)
-        params['actor_losses'].append(actor_loss.item())
-        params['critic_losses'].append(critic_loss.item())
+            params['losses'].append(loss.item())
+            params['durations'].append(eplen)
+            params['actor_losses'].append(actor_loss.item())
+            params['critic_losses'].append(critic_loss.item())
 
-        if epoch % 10 == 0:
-            print("Epoch: {}, Loss: {:.4f}, Ep Len: {}".format(
-                epoch, loss, eplen))
+            if epoch % 10 == 0:
+                print("Epoch: {}, Loss: {:.4f}, Ep Len: {}".format(
+                    epoch, loss, eplen))
 
 
-def run_episode(env, model, optimizer, params):
+def run_episode(env, model, optimizer, params, render, train):
     state = torch.from_numpy(env.reset()).float()
     values, logprobs, rewards = [], [], []
     done = False
@@ -166,19 +166,22 @@ def run_episode(env, model, optimizer, params):
         state_, reward, done, _ = env.step(action.detach().numpy())
         state = torch.from_numpy(state_).float()
 
+        if render:
+            env.render()
+
         if done:
             reward = -10
             env.reset()
 
         rewards.append(reward)
 
-        if step_count % params['step_update'] == 0:
+        if train and step_count % params['step_update'] == 0:
             update_params(optimizer, values, logprobs, rewards, params, mid_update=True)
 
     return values, logprobs, rewards, len(rewards)
 
 
-prev_logprobs = 0
+prev_logprobs = torch.Tensor([0])
 def update_params(optimizer, values, logprobs, rewards, params, mid_update=False):
     global prev_logprobs
 
@@ -203,12 +206,18 @@ def update_params(optimizer, values, logprobs, rewards, params, mid_update=False
     Returns = torch.stack(Returns).view(-1)
     Returns = F.normalize(Returns, dim=0)
 
-    actor_loss = -1*logprobs * (Returns - values.detach()) * gae_reduction
+    ppo_ratio = (logprobs - prev_logprobs[-1:]).exp()
+    torch.cat((prev_logprobs[1:], logprobs))
+    advantage = Returns - values.detach()
+    surrogate0 = ppo_ratio * advantage
+    surrogate1 = torch.clamp(ppo_ratio, 1.0 - params['ppo_epsilon'], 1.0 + params['ppo_epsilon']) * advantage
+
+    actor_loss = - torch.min(surrogate0, surrogate1) * gae_reduction
     critic_loss = torch.pow(values - (Returns * gae_reduction), 2)
 
-    loss = actor_loss.sum() + params['clc']*critic_loss.sum()
+    loss = actor_loss.mean() + params['clc']*critic_loss.mean()
     optimizer.zero_grad()
     loss.backward(retain_graph=True)
     optimizer.step()
 
-    return loss, actor_loss.sum(), critic_loss.sum()
+    return loss, actor_loss.sum(), critic_loss.mean()

@@ -15,6 +15,7 @@ gamma = 0.99
 gae = 0.9
 clc = 0.1
 step_update = 50
+ppo_epsilon = 0.2
 
 input_dim = 4
 shared_hidden0 = 25
@@ -39,6 +40,7 @@ params = {
     'step_update': step_update,
     'gamma': gamma,
     'gae': gae,
+    'ppo_epsilon': ppo_epsilon,
     'clc': clc, 
     'losses': losses,
     'durations': durations,

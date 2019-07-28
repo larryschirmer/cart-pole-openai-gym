@@ -1,7 +1,7 @@
 {
-  "python.pythonPath": "/Users/larryschirmer/miniconda3/envs/pytorch/bin/python",
+  "python.pythonPath": "/anaconda3/envs/pytorch/bin/python",
   "python.linting.pylintArgs": [
     "--errors-only",
-    "--generated-members=numpy.* ,torch.* ,cv2.* , cv.*"
+    "--generated-members=numpy.* ,torch.* ,cv2.* , cv.*, time.*"
   ]
 }

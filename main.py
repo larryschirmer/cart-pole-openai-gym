@@ -10,7 +10,7 @@ from time import perf_counter
 from model import ActorCritic, loss_fn
 from helpers import discount_rewards, train_model, plot_losses, plot_durations, save_model, load_model, worker
 
-lr = 0.0015
+lr = 0.001
 gamma = 0.99
 gae = 0.9
 clc = 0.1
@@ -27,7 +27,7 @@ output_dim_critic = 1
 model = ActorCritic(
     input_dim, shared_hidden0, shared_hidden1, critic_hidden, output_dim_actor, output_dim_critic)
 
-epochs = 1000
+epochs = 5000
 losses = []
 actor_losses = []
 critic_losses = []
@@ -49,7 +49,7 @@ params = {
 }
 
 
-worker(model, params)
+worker(model, params, max_eps=250)
 save_model(model, 'actor_critic.pt')
 
 rolling_window = 50

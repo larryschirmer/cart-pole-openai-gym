@@ -33,4 +33,4 @@ params = {
     'lr': lr
 }
 
-worker(model, params, render=True, train=False)
+worker(model, params, render=True, train=False, max_eps=1000)

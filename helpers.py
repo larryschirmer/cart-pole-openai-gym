@@ -118,9 +118,9 @@ def load_model(model, filename, evalMode=True):
     return model
 
 
-def worker(model, params, render=False, train=True):
+def worker(model, params, render=False, train=True, max_eps=300):
     env = gym.make("CartPole-v1")
-    env._max_episode_steps = 5000
+    env._max_episode_steps = max_eps
     optimizer = torch.optim.Adam(
         lr=params['lr'], params=model.parameters())
 
@@ -129,7 +129,7 @@ def worker(model, params, render=False, train=True):
         values, logprobs, rewards, eplen = run_episode(
             env, model, optimizer, params, render, train)
 
-        if train and eplen > highest_score:
+        if train and eplen >= highest_score:
             highest_score = eplen
             save_model(model, 'actor_critic_checkpoint@highest.pt')
 
@@ -145,6 +145,7 @@ def worker(model, params, render=False, train=True):
             if epoch % 10 == 0:
                 print("Epoch: {}, Loss: {:.4f}, Ep Len: {}, highest: {}".format(
                     epoch, loss, eplen, highest_score))
+
 
 def run_episode(env, model, optimizer, params, render, train):
     state = torch.from_numpy(env.reset()).float()
@@ -170,7 +171,7 @@ def run_episode(env, model, optimizer, params, render, train):
         state_, reward, done, _ = env.step(action.detach().numpy())
         state = torch.from_numpy(state_).float()
 
-        if render:
+        if not train:
             env.render()
 
         if done:
@@ -180,12 +181,17 @@ def run_episode(env, model, optimizer, params, render, train):
         rewards.append(reward)
 
         if train and step_count % params['step_update'] == 0:
-            update_params(optimizer, values, logprobs, rewards, params, mid_update=True)
+            update_params(optimizer, values, logprobs,
+                          rewards, params, mid_update=True)
+    
+    env.close()
 
     return values, logprobs, rewards, len(rewards)
 
 
 prev_logprobs = torch.Tensor([0])
+
+
 def update_params(optimizer, values, logprobs, rewards, params, mid_update=False):
     global prev_logprobs
 
@@ -204,24 +210,43 @@ def update_params(optimizer, values, logprobs, rewards, params, mid_update=False
         total_return = rewards[reward_index] + params['gamma'] * total_return
         Returns.append(total_return)
 
-    gae_reduction = torch.Tensor(
-        [(1 - params['gae']) * params['gae'] ** i for i in range(len(Returns))]).flip(dims=(0,))
-    gae_reduction = gae_reduction if not mid_update else 1
-    Returns = torch.stack(Returns).view(-1)
-    Returns = F.normalize(Returns, dim=0)
+    batch_index = 0
+    batches = []
+    while True:
 
-    ppo_ratio = (logprobs - prev_logprobs[-1:]).exp()
-    torch.cat((prev_logprobs[1:], logprobs))
-    advantage = Returns - values.detach()
-    surrogate0 = ppo_ratio * advantage
-    surrogate1 = torch.clamp(ppo_ratio, 1.0 - params['ppo_epsilon'], 1.0 + params['ppo_epsilon']) * advantage
+        batches.append((
+            Returns[batch_index: batch_index + params['step_update']],
+            logprobs[batch_index: batch_index + params['step_update']],
+            values[batch_index: batch_index + params['step_update']]))
 
-    actor_loss = - torch.min(surrogate0, surrogate1) * gae_reduction
-    critic_loss = torch.pow(values - (Returns * gae_reduction), 2)
+        batch_index += params['step_update']
 
-    loss = actor_loss.mean() + params['clc']*critic_loss.mean()
-    optimizer.zero_grad()
-    loss.backward(retain_graph=True)
-    optimizer.step()
+        if batch_index + params['step_update'] > len(rewards):
+            break
+
+    for batch in batches:
+
+        (Return, logprob, value) = batch
+
+        gae_reduction = torch.Tensor(
+            [(1 - params['gae']) * params['gae'] ** i for i in range(len(Return))]).flip(dims=(0,))
+        gae_reduction = gae_reduction if not mid_update else 1
+        Return = torch.stack(Return).view(-1)
+        Return = F.normalize(Return, dim=0)
+
+        ppo_ratio = (logprob - prev_logprobs[-1:]).exp()
+        torch.cat((prev_logprobs[1:], logprob))
+        advantage = Return - value.detach()
+        surrogate0 = ppo_ratio * advantage
+        surrogate1 = torch.clamp(
+            ppo_ratio, 1.0 - params['ppo_epsilon'], 1.0 + params['ppo_epsilon']) * advantage
+
+        actor_loss = - torch.min(surrogate0, surrogate1) * gae_reduction
+        critic_loss = torch.pow(value - (Return * gae_reduction), 2)
+
+        loss = actor_loss.mean() + params['clc']*critic_loss.mean()
+        optimizer.zero_grad()
+        loss.backward(retain_graph=True)
+        optimizer.step()
 
     return loss, actor_loss.sum(), critic_loss.sum()
